@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 /** Number of days in the daily series. */
-export const DAYS = 14
+export const DAYS = 90
 
 /**
  * Resolve opencode's data directory the same way opencode does.
@@ -80,7 +80,7 @@ function dayKey(date) {
 /**
  * Aggregate opencode usage from the database.
  * @param {string} dbPath - Absolute path to opencode's SQLite database.
- * @returns {Promise<object>} Totals, per-model rows, and a filled daily series.
+ * @returns {Promise<object>} Totals, per-model rows, and a filled 90-day series.
  */
 export async function readUsage(dbPath) {
   let DatabaseSync

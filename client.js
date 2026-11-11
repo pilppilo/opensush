@@ -27,9 +27,14 @@ window.__ModuleLoader__.load({
       tokens: 'Total tokens',
       cacheRead: 'Cache read',
       sessions: 'Sessions',
-      dailyTitle: 'Tokens per day',
-      dailyHint: 'Last 14 days, local time',
-      modelsTitle: 'By model',
+      dailyTitle: 'Usage by day',
+      dailyHint: 'Daily usage · local time',
+      modelsTitle: 'Usage by model',
+      metricTokens: 'Tokens',
+      metricCost: 'Cost',
+      metricMessages: 'Messages',
+      rangeDays: '{days} days',
+      totalInRange: 'In this period',
       colModel: 'Model',
       colMessages: 'Messages',
       colTokens: 'Tokens',
@@ -56,9 +61,14 @@ window.__ModuleLoader__.load({
       tokens: '总 Token',
       cacheRead: '缓存读取',
       sessions: '会话数',
-      dailyTitle: '每日 Token',
-      dailyHint: '最近 14 天，本地时间',
-      modelsTitle: '按模型',
+      dailyTitle: '每日用量',
+      dailyHint: '每日用量 · 本地时间',
+      modelsTitle: '按模型统计',
+      metricTokens: 'Token',
+      metricCost: '费用',
+      metricMessages: '消息',
+      rangeDays: '{days} 天',
+      totalInRange: '此期间总计',
       colModel: '模型',
       colMessages: '消息数',
       colTokens: 'Token',
@@ -132,6 +142,10 @@ window.__ModuleLoader__.load({
 }
 .ocu-section { display: flex; flex-direction: column; gap: 8px; }
 .ocu-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ocu-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ocu-segment { display: inline-flex; padding: 2px; gap: 2px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); }
+.ocu-segment button { border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); padding: 3px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+.ocu-segment button[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
 .ocu-section-title { font-size: 13px; line-height: 18px; font-weight: 600; }
 .ocu-section-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
 .ocu-chart {
@@ -271,20 +285,22 @@ window.__ModuleLoader__.load({
      * @param {{ daily: Array<object>, t: Function }} props - Series and translator.
      * @returns {object} React element.
      */
-    function DailyChart({ daily, t }) {
-      const max = Math.max(1, ...daily.map((entry) => entry.tokens))
+    function DailyChart({ daily, t, metric }) {
+      const valueFor = (entry) => entry[metric]
+      const max = Math.max(1, ...daily.map(valueFor))
+      const formatValue = metric === 'tokens' ? formatTokens : metric === 'cost' ? formatCost : formatCount
       return h('div', {
         className: 'ocu-chart',
         role: 'img',
-        'aria-label': `${t('dailyTitle')} · ${t('dailyHint')}`,
+        'aria-label': `${t(`metric${metric[0].toUpperCase()}${metric.slice(1)}`)} · ${t('dailyHint')}`,
       }, daily.map((entry) => h('div', {
         className: 'ocu-bar-col',
         key: entry.day,
-        title: `${entry.day} · ${formatTokens(entry.tokens)} ${t('colTokens')} · ${formatCost(entry.cost)}`,
+        title: `${entry.day} · ${formatValue(valueFor(entry))} ${t(`metric${metric[0].toUpperCase()}${metric.slice(1)}`)}`,
       }, [
         h('div', { className: 'ocu-bar-wrap', key: 'bar' }, h('div', {
           className: 'ocu-bar',
-          style: { height: `${entry.tokens > 0 ? Math.max(3, Math.round((entry.tokens / max) * 100)) : 2}%` },
+          style: { height: `${valueFor(entry) > 0 ? Math.max(3, Math.round((valueFor(entry) / max) * 100)) : 2}%` },
         })),
         h('div', { className: 'ocu-bar-day', key: 'day' }, entry.day.slice(5)),
       ])))
@@ -325,6 +341,8 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('')
       const [busy, setBusy] = React.useState(true)
       const [request, setRequest] = React.useState({ id: 0, force: false })
+      const [metric, setMetric] = React.useState('tokens')
+      const [range, setRange] = React.useState(14)
 
       React.useEffect(() => {
         let alive = true
@@ -399,7 +417,9 @@ window.__ModuleLoader__.load({
         ])
       }
 
-      const { totals, daily, models, dbPath, generatedAt } = payload
+      const { totals, daily: allDaily, models, dbPath, generatedAt } = payload
+      const daily = allDaily.slice(-range)
+      const rangeTotal = daily.reduce((sum, entry) => sum + (entry[metric] || 0), 0)
       const rows = models.length > 0
         ? h(ModelTable, { models, t, key: 'models' })
         : h('div', { className: 'ocu-muted', key: 'no-usage' }, t('noUsage'))
@@ -417,10 +437,22 @@ window.__ModuleLoader__.load({
         ]),
         h('div', { className: 'ocu-section', key: 'daily' }, [
           h('div', { className: 'ocu-section-head', key: 'head' }, [
-            h('div', { className: 'ocu-section-title', key: 'title' }, t('dailyTitle')),
-            h('div', { className: 'ocu-section-hint', key: 'hint' }, t('dailyHint')),
+            h('div', { key: 'labels' }, [
+              h('div', { className: 'ocu-section-title', key: 'title' }, t('dailyTitle')),
+              h('div', { className: 'ocu-section-hint', key: 'hint' }, `${t('totalInRange')}: ${metric === 'tokens' ? formatTokens(rangeTotal) : metric === 'cost' ? formatCost(rangeTotal) : formatCount(rangeTotal)}`),
+            ]),
+            h('div', { className: 'ocu-controls', key: 'controls' }, [
+              h('div', { className: 'ocu-segment', role: 'group', 'aria-label': t('dailyTitle'), key: 'metrics' }, ['tokens', 'cost', 'messages'].map((item) => h('button', {
+                key: item, type: 'button', 'aria-pressed': metric === item,
+                onClick: () => setMetric(item),
+              }, t(`metric${item[0].toUpperCase()}${item.slice(1)}`)))),
+              h('div', { className: 'ocu-segment', role: 'group', 'aria-label': t('dailyHint'), key: 'ranges' }, [7, 14, 30].map((days) => h('button', {
+                key: days, type: 'button', 'aria-pressed': range === days,
+                onClick: () => setRange(days),
+              }, t('rangeDays', { days })))),
+            ]),
           ]),
-          h(DailyChart, { daily, t, key: 'chart' }),
+          h(DailyChart, { daily, t, metric, key: 'chart' }),
         ]),
         h('div', { className: 'ocu-section', key: 'models' }, [
           h('div', { className: 'ocu-section-head', key: 'head' }, [
