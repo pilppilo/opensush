@@ -27,13 +27,20 @@ window.__ModuleLoader__.load({
       tokens: 'Total tokens',
       cacheRead: 'Cache read',
       sessions: 'Sessions',
+      periodUsage: 'Selected period · {days} days',
+      overallUsage: 'Overall usage · all time',
       dailyTitle: 'Usage by day',
       dailyHint: 'Daily usage · local time',
       modelsTitle: 'Usage by model',
+      allTimeModels: 'All-time usage by model',
       metricTokens: 'Tokens',
       metricCost: 'Cost',
       metricMessages: 'Messages',
+      metricInput: 'Input',
+      metricOutput: 'Output',
+      metricCacheRead: 'Cache read',
       rangeDays: '{days} days',
+      rangeLabel: 'Days to show',
       totalInRange: 'In this period',
       colModel: 'Model',
       colMessages: 'Messages',
@@ -61,13 +68,20 @@ window.__ModuleLoader__.load({
       tokens: '总 Token',
       cacheRead: '缓存读取',
       sessions: '会话数',
+      periodUsage: '所选期间 · {days} 天',
+      overallUsage: '总体用量 · 全部时间',
       dailyTitle: '每日用量',
       dailyHint: '每日用量 · 本地时间',
       modelsTitle: '按模型统计',
+      allTimeModels: '全部时间的模型用量',
       metricTokens: 'Token',
       metricCost: '费用',
       metricMessages: '消息',
+      metricInput: '输入',
+      metricOutput: '输出',
+      metricCacheRead: '缓存读取',
       rangeDays: '{days} 天',
+      rangeLabel: '显示天数',
       totalInRange: '此期间总计',
       colModel: '模型',
       colMessages: '消息数',
@@ -119,9 +133,10 @@ window.__ModuleLoader__.load({
 .ocu-button:disabled { opacity: 0.5; cursor: default; }
 .ocu-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
+@media (max-width: 620px) { .ocu-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ocu-stat {
   padding: 12px;
   border: 0.5px solid var(--dsw-alias-border-l1);
@@ -143,37 +158,24 @@ window.__ModuleLoader__.load({
 .ocu-section { display: flex; flex-direction: column; gap: 8px; }
 .ocu-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .ocu-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ocu-range-input { width: 64px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 5px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); padding: 3px 6px; font: inherit; font-size: 11px; }
 .ocu-segment { display: inline-flex; padding: 2px; gap: 2px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); }
 .ocu-segment button { border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); padding: 3px 8px; font: inherit; font-size: 11px; cursor: pointer; }
 .ocu-segment button[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
 .ocu-section-title { font-size: 13px; line-height: 18px; font-weight: 600; }
 .ocu-section-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
 .ocu-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 12px;
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 8px 4px;
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-1);
 }
-.ocu-bar-col { display: flex; flex-direction: column; gap: 6px; flex: 1 1 0; min-width: 0; }
-.ocu-bar-wrap { display: flex; align-items: flex-end; height: 72px; }
-.ocu-bar {
-  width: 100%;
-  min-height: 2px;
-  border-radius: 2px;
-  background: var(--dsw-alias-brand-primary);
-  opacity: 0.85;
-}
-.ocu-bar-day {
-  color: var(--dsw-alias-label-secondary);
-  font-size: 9px;
-  line-height: 12px;
-  text-align: center;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
+.ocu-chart-grid { stroke: var(--dsw-alias-border-l1); stroke-width: 1; }
+.ocu-chart-axis { fill: var(--dsw-alias-label-secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ocu-chart-bar { fill: var(--dsw-alias-brand-primary); opacity: .85; }
 .ocu-table { width: 100%; border-collapse: collapse; }
 .ocu-table th {
   padding: 6px 8px;
@@ -281,7 +283,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Render the daily token bars.
+     * Render a scaled daily usage chart with readable value and date axes.
      * @param {{ daily: Array<object>, t: Function }} props - Series and translator.
      * @returns {object} React element.
      */
@@ -289,21 +291,45 @@ window.__ModuleLoader__.load({
       const valueFor = (entry) => entry[metric]
       const max = Math.max(1, ...daily.map(valueFor))
       const formatValue = metric === 'tokens' ? formatTokens : metric === 'cost' ? formatCost : formatCount
-      return h('div', {
+      const width = 760
+      const height = 240
+      const left = 62
+      const right = 748
+      const top = 14
+      const bottom = 198
+      const plotWidth = right - left
+      const plotHeight = bottom - top
+      const step = plotWidth / Math.max(daily.length, 1)
+      const tickDays = new Set([0, Math.floor((daily.length - 1) / 4), Math.floor((daily.length - 1) / 2), Math.floor((3 * (daily.length - 1)) / 4), daily.length - 1])
+      const grid = [0, 0.25, 0.5, 0.75, 1]
+      return h('svg', {
         className: 'ocu-chart',
         role: 'img',
         'aria-label': `${t(`metric${metric[0].toUpperCase()}${metric.slice(1)}`)} · ${t('dailyHint')}`,
-      }, daily.map((entry) => h('div', {
-        className: 'ocu-bar-col',
-        key: entry.day,
-        title: `${entry.day} · ${formatValue(valueFor(entry))} ${t(`metric${metric[0].toUpperCase()}${metric.slice(1)}`)}`,
+        viewBox: `0 0 ${width} ${height}`,
+        preserveAspectRatio: 'xMidYMid meet',
       }, [
-        h('div', { className: 'ocu-bar-wrap', key: 'bar' }, h('div', {
-          className: 'ocu-bar',
-          style: { height: `${valueFor(entry) > 0 ? Math.max(3, Math.round((valueFor(entry) / max) * 100)) : 2}%` },
-        })),
-        h('div', { className: 'ocu-bar-day', key: 'day' }, entry.day.slice(5)),
-      ])))
+        ...grid.map((fraction) => {
+          const y = bottom - fraction * plotHeight
+          return h(React.Fragment, { key: `grid-${fraction}` }, [
+            h('line', { className: 'ocu-chart-grid', x1: left, x2: right, y1: y, y2: y, key: 'line' }),
+            h('text', { className: 'ocu-chart-axis', x: left - 8, y: y + 3, textAnchor: 'end', key: 'label' }, formatValue(max * fraction)),
+          ])
+        }),
+        ...daily.map((entry, index) => {
+          const value = valueFor(entry)
+          const barHeight = value > 0 ? Math.max(1, (value / max) * plotHeight) : 0
+          const barWidth = Math.min(24, step * 0.68)
+          const x = left + index * step + (step - barWidth) / 2
+          const y = bottom - barHeight
+          return h('rect', {
+            className: 'ocu-chart-bar', key: entry.day, x, y, width: Math.max(1, barWidth), height: barHeight,
+          }, h('title', null, `${entry.day} · ${formatValue(value)} ${t(`metric${metric[0].toUpperCase()}${metric.slice(1)}`)}`))
+        }),
+        ...daily.map((entry, index) => tickDays.has(index) ? h('text', {
+          className: 'ocu-chart-axis', key: `day-${entry.day}`, x: left + index * step + step / 2, y: 220, textAnchor: 'middle',
+        }, entry.day.slice(5)) : null),
+      ])
     }
 
     /**
@@ -316,7 +342,9 @@ window.__ModuleLoader__.load({
         h('thead', { key: 'head' }, h('tr', null, [
           h('th', { key: 'model' }, t('colModel')),
           h('th', { className: 'ocu-num', key: 'messages' }, t('colMessages')),
-          h('th', { className: 'ocu-num', key: 'tokens' }, t('colTokens')),
+          h('th', { className: 'ocu-num', key: 'input' }, t('metricInput')),
+          h('th', { className: 'ocu-num', key: 'output' }, t('metricOutput')),
+          h('th', { className: 'ocu-num', key: 'cache' }, t('metricCacheRead')),
           h('th', { className: 'ocu-num', key: 'cost' }, t('colCost')),
         ])),
         h('tbody', { key: 'body' }, models.map((row) => h('tr', { key: `${row.provider}/${row.model}` }, [
@@ -325,7 +353,9 @@ window.__ModuleLoader__.load({
             h('span', { className: 'ocu-model-provider', key: 'provider' }, row.provider),
           ])),
           h('td', { className: 'ocu-num', key: 'messages' }, formatCount(row.messages)),
-          h('td', { className: 'ocu-num', key: 'tokens' }, formatTokens(row.tokens)),
+          h('td', { className: 'ocu-num', key: 'input' }, formatTokens(row.input)),
+          h('td', { className: 'ocu-num', key: 'output' }, formatTokens(row.output)),
+          h('td', { className: 'ocu-num', key: 'cache' }, formatTokens(row.cacheRead)),
           h('td', { className: 'ocu-num', key: 'cost' }, formatCost(row.cost)),
         ]))),
       ])
@@ -343,6 +373,7 @@ window.__ModuleLoader__.load({
       const [request, setRequest] = React.useState({ id: 0, force: false })
       const [metric, setMetric] = React.useState('tokens')
       const [range, setRange] = React.useState(14)
+      const [customDays, setCustomDays] = React.useState('14')
 
       React.useEffect(() => {
         let alive = true
@@ -417,23 +448,48 @@ window.__ModuleLoader__.load({
         ])
       }
 
-      const { totals, daily: allDaily, models, dbPath, generatedAt } = payload
+      const { totals, allTimeModels = [], daily: allDaily, dailyModels = [], dbPath, generatedAt } = payload
       const daily = allDaily.slice(-range)
       const rangeTotal = daily.reduce((sum, entry) => sum + (entry[metric] || 0), 0)
-      const rows = models.length > 0
-        ? h(ModelTable, { models, t, key: 'models' })
+      const period = daily.reduce((sum, entry) => ({
+        cost: sum.cost + entry.cost,
+        tokens: sum.tokens + entry.tokens,
+        input: sum.input + entry.input,
+        output: sum.output + entry.output,
+        cacheRead: sum.cacheRead + entry.cacheRead,
+        messages: sum.messages + entry.messages,
+        sessions: sum.sessions + entry.sessions,
+      }), { cost: 0, tokens: 0, input: 0, output: 0, cacheRead: 0, messages: 0, sessions: 0 })
+      const selectedDays = new Set(daily.map((entry) => entry.day))
+      const modelTotals = new Map()
+      for (const entry of dailyModels) {
+        if (!selectedDays.has(entry.day)) continue
+        const key = `${entry.provider}/${entry.model}`
+        const row = modelTotals.get(key) || { provider: entry.provider, model: entry.model, messages: 0, tokens: 0, cost: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0 }
+        for (const field of ['messages', 'tokens', 'cost', 'input', 'output', 'reasoning', 'cacheRead']) row[field] += entry[field] || 0
+        modelTotals.set(key, row)
+      }
+      const models = [...modelTotals.values()].sort((a, b) => b[metric] - a[metric])
+      const periodRows = models.length > 0
+        ? h(ModelTable, { models, t, key: 'period-models' })
         : h('div', { className: 'ocu-muted', key: 'no-usage' }, t('noUsage'))
+      const overallRows = allTimeModels.length > 0
+        ? h(ModelTable, { models: allTimeModels, t, key: 'overall-models' })
+        : h('div', { className: 'ocu-muted', key: 'no-overall-usage' }, t('noUsage'))
 
       return h('div', { className: 'ocu-root' }, [
         header,
         error !== '' ? h('div', { className: 'ocu-alert', role: 'alert', key: 'stale' }, [
           h('div', { className: 'ocu-alert-body', key: 'body' }, error),
         ]) : null,
-        h('div', { className: 'ocu-stats', key: 'stats' }, [
-          h(StatCard, { key: 'cost', label: t('spend'), value: formatCost(totals.cost), title: `$${totals.cost.toFixed(6)}` }),
-          h(StatCard, { key: 'tokens', label: t('tokens'), value: formatTokens(totals.tokens), title: formatCount(totals.tokens) }),
-          h(StatCard, { key: 'cache', label: t('cacheRead'), value: formatTokens(totals.cacheRead), title: formatCount(totals.cacheRead) }),
-          h(StatCard, { key: 'sessions', label: t('sessions'), value: formatCount(totals.sessions), title: `${formatCount(totals.messages)} ${t('colMessages')}` }),
+        h('div', { className: 'ocu-section', key: 'period-summary' }, [
+          h('div', { className: 'ocu-section-title', key: 'title' }, t('periodUsage', { days: range })),
+          h('div', { className: 'ocu-stats', key: 'stats' }, [
+            h(StatCard, { key: 'cost', label: t('spend'), value: formatCost(period.cost), title: `$${period.cost.toFixed(6)}` }),
+            h(StatCard, { key: 'tokens', label: t('tokens'), value: formatTokens(period.tokens), title: formatCount(period.tokens) }),
+            h(StatCard, { key: 'cache', label: t('cacheRead'), value: formatTokens(period.cacheRead), title: formatCount(period.cacheRead) }),
+            h(StatCard, { key: 'messages', label: t('colMessages'), value: formatCount(period.messages) }),
+          ]),
         ]),
         h('div', { className: 'ocu-section', key: 'daily' }, [
           h('div', { className: 'ocu-section-head', key: 'head' }, [
@@ -446,10 +502,23 @@ window.__ModuleLoader__.load({
                 key: item, type: 'button', 'aria-pressed': metric === item,
                 onClick: () => setMetric(item),
               }, t(`metric${item[0].toUpperCase()}${item.slice(1)}`)))),
-              h('div', { className: 'ocu-segment', role: 'group', 'aria-label': t('dailyHint'), key: 'ranges' }, [7, 14, 30].map((days) => h('button', {
+              h('div', { className: 'ocu-segment', role: 'group', 'aria-label': t('dailyHint'), key: 'ranges' }, [7, 14, 30, 90].map((days) => h('button', {
                 key: days, type: 'button', 'aria-pressed': range === days,
-                onClick: () => setRange(days),
+                onClick: () => { setRange(days); setCustomDays(String(days)) },
               }, t('rangeDays', { days })))),
+              h('label', { className: 'ocu-controls', key: 'custom', style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, [
+                t('rangeLabel'),
+                h('input', {
+                  className: 'ocu-range-input', type: 'number', min: 1, max: 90, value: customDays,
+                  'aria-label': t('rangeLabel'),
+                  onChange: (event) => {
+                    const value = event.target.value
+                    setCustomDays(value)
+                    const days = Number(value)
+                    if (Number.isInteger(days) && days >= 1 && days <= 90) setRange(days)
+                  },
+                }),
+              ]),
             ]),
           ]),
           h(DailyChart, { daily, t, metric, key: 'chart' }),
@@ -457,8 +526,20 @@ window.__ModuleLoader__.load({
         h('div', { className: 'ocu-section', key: 'models' }, [
           h('div', { className: 'ocu-section-head', key: 'head' }, [
             h('div', { className: 'ocu-section-title', key: 'title' }, t('modelsTitle')),
+            h('div', { className: 'ocu-section-hint', key: 'hint' }, `${t('totalInRange')}: ${t('rangeDays', { days: range })}`),
           ]),
-          rows,
+          periodRows,
+        ]),
+        h('div', { className: 'ocu-section', key: 'overall' }, [
+          h('div', { className: 'ocu-section-title', key: 'title' }, t('overallUsage')),
+          h('div', { className: 'ocu-stats', key: 'stats' }, [
+            h(StatCard, { key: 'cost', label: t('spend'), value: formatCost(totals.cost), title: `$${totals.cost.toFixed(6)}` }),
+            h(StatCard, { key: 'tokens', label: t('tokens'), value: formatTokens(totals.tokens), title: formatCount(totals.tokens) }),
+            h(StatCard, { key: 'cache', label: t('cacheRead'), value: formatTokens(totals.cacheRead), title: formatCount(totals.cacheRead) }),
+            h(StatCard, { key: 'sessions', label: t('sessions'), value: formatCount(totals.sessions), title: `${formatCount(totals.messages)} ${t('colMessages')}` }),
+          ]),
+          h('div', { className: 'ocu-section-title', key: 'models-title', style: { marginTop: 8 } }, t('allTimeModels')),
+          overallRows,
         ]),
         h('div', { className: 'ocu-foot', key: 'foot' }, [
           h('div', { key: 'source' }, [
