@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "OpenCode 用量",
+    "description": "显示本地 opencode 数据库中的 Token 与费用统计。"
+  }
+}
