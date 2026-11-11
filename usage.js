@@ -52,10 +52,19 @@ const USAGE_CTE = `
       COALESCE(json_extract(data, '$.tokens.reasoning'), 0) AS reasoning,
       COALESCE(json_extract(data, '$.tokens.cache.read'), 0) AS cache_read,
       COALESCE(json_extract(data, '$.tokens.cache.write'), 0) AS cache_write,
-      COALESCE(json_extract(data, '$.model.providerID'), json_extract(data, '$.providerID'), 'unknown') AS provider,
-      COALESCE(json_extract(data, '$.model.id'), json_extract(data, '$.modelID'), 'unknown') AS model
+      COALESCE(NULLIF(json_extract(data, '$.providerID'), ''), json_extract(data, '$.model.providerID'), 'unknown') AS provider,
+      COALESCE(NULLIF(json_extract(data, '$.modelID'), ''), json_extract(data, '$.model.id'), 'unknown') AS model
     FROM session_message
-    WHERE type = 'assistant' AND json_valid(data)
+    WHERE type = 'assistant'
+      AND json_valid(data)
+      AND (
+        COALESCE(json_extract(data, '$.cost'), 0) > 0
+        OR COALESCE(json_extract(data, '$.tokens.input'), 0) > 0
+        OR COALESCE(json_extract(data, '$.tokens.output'), 0) > 0
+        OR COALESCE(json_extract(data, '$.tokens.reasoning'), 0) > 0
+        OR COALESCE(json_extract(data, '$.tokens.cache.read'), 0) > 0
+        OR COALESCE(json_extract(data, '$.tokens.cache.write'), 0) > 0
+      )
   )
 `
 
@@ -117,20 +126,28 @@ export async function readUsage(dbPath) {
     }
     totals.tokens = totals.input + totals.output + totals.reasoning + totals.cacheRead + totals.cacheWrite
 
-    const models = db.prepare(`${USAGE_CTE}
-      SELECT provider, model,
-             COUNT(*) AS messages,
+    const allTimeModels = db.prepare(`${USAGE_CTE}
+      SELECT provider, model, COUNT(*) AS messages,
              COALESCE(SUM(cost), 0) AS cost,
+             COALESCE(SUM(input), 0) AS input,
+             COALESCE(SUM(output), 0) AS output,
+             COALESCE(SUM(reasoning), 0) AS reasoning,
+             COALESCE(SUM(cache_read), 0) AS cache_read,
+             COALESCE(SUM(cache_write), 0) AS cache_write,
              COALESCE(SUM(input + output + reasoning + cache_read + cache_write), 0) AS tokens
       FROM usage
       GROUP BY provider, model
-      ORDER BY cost DESC, tokens DESC
-      LIMIT 10
+      ORDER BY tokens DESC, cost DESC
     `).all().map((row) => ({
       provider: String(row.provider ?? 'unknown'),
       model: String(row.model ?? 'unknown'),
       messages: num(row.messages),
       cost: num(row.cost),
+      input: num(row.input),
+      output: num(row.output),
+      reasoning: num(row.reasoning),
+      cacheRead: num(row.cache_read),
+      cacheWrite: num(row.cache_write),
       tokens: num(row.tokens),
     }))
 
@@ -142,12 +159,44 @@ export async function readUsage(dbPath) {
       SELECT date(time_created / 1000, 'unixepoch', 'localtime') AS day,
              COALESCE(SUM(cost), 0) AS cost,
              COALESCE(SUM(input + output + reasoning + cache_read + cache_write), 0) AS tokens,
-             COUNT(*) AS messages
+             COALESCE(SUM(input), 0) AS input,
+             COALESCE(SUM(output), 0) AS output,
+             COALESCE(SUM(cache_read), 0) AS cache_read,
+             COUNT(*) AS messages,
+             COUNT(DISTINCT session_id) AS sessions
       FROM usage
       WHERE time_created >= ?
       GROUP BY day
       ORDER BY day
     `).all(startOfWindow.getTime())
+
+    const dailyModelRows = db.prepare(`${USAGE_CTE}
+      SELECT date(time_created / 1000, 'unixepoch', 'localtime') AS day,
+             provider, model, COUNT(*) AS messages,
+             COALESCE(SUM(cost), 0) AS cost,
+             COALESCE(SUM(input), 0) AS input,
+             COALESCE(SUM(output), 0) AS output,
+             COALESCE(SUM(reasoning), 0) AS reasoning,
+             COALESCE(SUM(cache_read), 0) AS cache_read,
+             COALESCE(SUM(cache_write), 0) AS cache_write,
+             COALESCE(SUM(input + output + reasoning + cache_read + cache_write), 0) AS tokens
+      FROM usage
+      WHERE time_created >= ?
+      GROUP BY day, provider, model
+      ORDER BY day
+    `).all(startOfWindow.getTime()).map((row) => ({
+      day: String(row.day),
+      provider: String(row.provider ?? 'unknown'),
+      model: String(row.model ?? 'unknown'),
+      messages: num(row.messages),
+      cost: num(row.cost),
+      input: num(row.input),
+      output: num(row.output),
+      reasoning: num(row.reasoning),
+      cacheRead: num(row.cache_read),
+      cacheWrite: num(row.cache_write),
+      tokens: num(row.tokens),
+    }))
 
     const byDay = new Map(dailyRows.map((row) => [String(row.day), row]))
     const daily = []
@@ -160,11 +209,15 @@ export async function readUsage(dbPath) {
         day: key,
         cost: row ? num(row.cost) : 0,
         tokens: row ? num(row.tokens) : 0,
+        input: row ? num(row.input) : 0,
+        output: row ? num(row.output) : 0,
+        cacheRead: row ? num(row.cache_read) : 0,
         messages: row ? num(row.messages) : 0,
+        sessions: row ? num(row.sessions) : 0,
       })
     }
 
-    return { totals, models, daily, days: DAYS }
+    return { totals, allTimeModels, daily, dailyModels: dailyModelRows, days: DAYS }
   } finally {
     db.close()
   }
